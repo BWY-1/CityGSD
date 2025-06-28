@@ -1,5 +1,6 @@
 <div align="center">
-<h1>CityGS-X</h1>
+<h1>[ICCV 2025] CityGS-X : A Scalable Architecture for Efficient and Geometrically Accurate Large-Scale Scene Reconstruction
+</h1>
 
 <a href="https://arxiv.org/abs/2503.23044" target="_blank" rel="noopener noreferrer">
   <img src="https://img.shields.io/badge/Paper-VGGT" alt="Paper PDF">
@@ -10,8 +11,7 @@
 
 **Northwestern Polytechnical University**; **Shanghai Artificial Intelligence Laboratory**
 
-| CityGS-X : A Scalable Architecture for Efficient and Geometrically Accurate Large-Scale Scene Reconstruction
-
+<!-- | [ICCV 2025] CityGS-X : A Scalable Architecture for Efficient and Geometrically Accurate Large-Scale Scene Reconstruction -->
 
 [Yuanyuan Gao*](https://scholar.google.com/citations?hl=en&user=1zDq0q8AAAAJ), [Hao Li*](https://lifuguan.github.io/), [Jiaqi Chen*](https://github.com/chenttt2001), [Zhengyu Zou](https://vision-intelligence.com.cn), [Zhihang Zhong†](https://zzh-tech.github.io), [Dingwen Zhang†](https://vision-intelligence.com.cn), [Xiao Sun](https://jimmysuen.github.io), [Junwei Han](https://vision-intelligence.com.cn)<br>(\* indicates equal contribution, † means co-corresponding author)<br>
 
@@ -23,6 +23,7 @@ This repo contains official implementations of CityGS-X, ⭐ us if you like it!
 
 ## Project Updates
 - 🔥🔥 News: ```2025/4/17```: training & inference code is now available! You can try it.
+- 🔥🔥 News: ```2025/6/28```: CityGS-X has been accepted to ICCV 2025.
   
 ## Todo List
 - [x] Release the training & inference code of CityGS-X.
