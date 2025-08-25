@@ -131,7 +131,7 @@ def loadCam(args, id, cam_info, decompressed_image=None, return_image=False, dep
             else:
                 depth_reliable = None
                 invdepthmap = None
-            if os.path.exists(mask_path) and ~args.not_use_dpt_loss:
+            if os.path.exists(mask_path) and not args.not_use_dpt_loss:
                 mask_color = cv2.imread(mask_path, -1).astype(np.float32) 
                 # mask = mask != 0
                 mask = np.any(mask_color != [0, 0, 0], axis=-1)

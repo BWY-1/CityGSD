@@ -59,3 +59,4 @@ submodule_cityx/diff-gaussian-rasterization/diff_gaussian_rasterization.egg-info
 submodule_cityx/diff-gaussian-rasterization/diff_gaussian_rasterization.egg-info/PKG-INFO
 sci_art.zip
 rubble_result.zip
+run.sh
