@@ -27,7 +27,7 @@ This repo contains official implementations of CityGS-X, ⭐ us if you like it!
   
 ## Todo List
 - [x] Release the training & inference code of CityGS-X.
-- [ ] Release all model checkpoints.
+- [x] Reproduction scripts, records, and results under different parameter settings are available at [yy456/CityGS-X](https://huggingface.co/datasets/yy456/CityGS-X). Many thanks to [@gongshiqiang02](https://github.com/gongshiqiang02) for providing the reproduction results.
 
 
 ## Installation
