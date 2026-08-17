@@ -59,7 +59,27 @@ class Scene:
         else:
             raise ValueError("No valid dataset found in the source path")
 
-        self.gaussians.set_appearance(len(scene_info.train_cameras))
+        appearance_camera_count = (
+            scene_info.global_camera_count
+            if scene_info.global_camera_count > 0
+            else len(scene_info.train_cameras)
+        )
+        self.gaussians.set_appearance(appearance_camera_count)
+        self.block_spec = scene_info.block_spec
+        if self.block_spec is not None:
+            self.gaussians.set_block_bounds(self.block_spec)
+            if utils.GLOBAL_RANK == 0:
+                with open(os.path.join(self.model_path, "block.json"), "w") as block_file:
+                    json.dump(
+                        {
+                            "id": self.block_spec.block_id,
+                            "core_aabb": [self.block_spec.core_min.tolist(), self.block_spec.core_max.tolist()],
+                            "train_aabb": [self.block_spec.train_min.tolist(), self.block_spec.train_max.tolist()],
+                            "manifest_hash": self.block_spec.manifest_hash,
+                        },
+                        block_file,
+                        indent=2,
+                    )
 
 
         if not self.loaded_iter:
@@ -163,7 +183,7 @@ class Scene:
         self.world_view_transforms = []
         camera_centers = []
         center_rays = []
-        if not args.eval:
+        if not args.eval and self.train_cameras:
             for id, cur_cam in enumerate(self.train_cameras):
                 self.world_view_transforms.append(cur_cam.world_view_transform)
                 camera_centers.append(cur_cam.camera_center)
@@ -210,10 +230,10 @@ class Scene:
                     self.model_path, "point_cloud", "iteration_" + str(self.loaded_iter)
                 )
             )
-            if not args.eval:
-                self.gaussians.get_camer_info(self.train_cameras,[1.0])
-            else:
-                self.gaussians.get_camer_info(self.test_cameras,[1.0])
+            cameras_for_lod = self.test_cameras if args.eval else self.train_cameras
+            if not cameras_for_lod:
+                cameras_for_lod = self.test_cameras or self.train_cameras
+            self.gaussians.get_camer_info(cameras_for_lod, [1.0])
             self.gaussians.load_mlp_checkpoints(os.path.join(self.model_path,
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter)))

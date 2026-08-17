@@ -113,6 +113,13 @@ class GaussianModel:
         self.optimizer = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
+        self.block_id = ""
+        self.block_manifest_hash = ""
+        self.block_core_min = None
+        self.block_core_max = None
+        self.block_train_min = None
+        self.block_train_max = None
+        self.block_core_max_inclusive = None
         self.setup_functions()
 
         self.opacity_dist_dim = 1 if self.add_opacity_dist else 0
@@ -168,43 +175,145 @@ class GaussianModel:
 
 
     def capture(self):
-        return (
-            self.active_sh_degree,
-            self._xyz,
-            self._features_dc,
-            self._features_rest,
-            self._scaling,
-            self._rotation,
-            self._opacity,
-            self.max_radii2D,
-            self.xyz_gradient_accum,  # TODO: deal with self.send_to_gpui_cnt
-            self.denom,
-            self.optimizer.state_dict(),
-            self.spatial_lr_scale,
-        )
+        """Capture all state required to resume anchor-based training."""
+        checkpoint = {
+            "format_version": 1,
+            "anchor": self._anchor.detach(),
+            "level": self._level.detach(),
+            "extra_level": self._extra_level.detach(),
+            "offset": self._offset.detach(),
+            "anchor_feat": self._anchor_feat.detach(),
+            "scaling": self._scaling.detach(),
+            "rotation": self._rotation.detach(),
+            "opacity": self._opacity.detach(),
+            "anchor_mask": self._anchor_mask.detach(),
+            "opacity_accum": self.opacity_accum,
+            "offset_gradient_accum": self.offset_gradient_accum,
+            "offset_denom": self.offset_denom,
+            "anchor_demon": self.anchor_demon,
+            "mlp_opacity": self.mlp_opacity.state_dict(),
+            "mlp_cov": self.mlp_cov.state_dict(),
+            "mlp_color": self.mlp_color.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "spatial_lr_scale": self.spatial_lr_scale,
+            "voxel_size": self.voxel_size,
+            "standard_dist": self.standard_dist,
+            "init_pos": self.init_pos,
+            "levels": self.levels,
+            "init_level": self.init_level,
+            "base_layer": self.base_layer,
+            "block": self._capture_block_state(),
+        }
+        if self.use_feat_bank:
+            checkpoint["mlp_feature_bank"] = self.mlp_feature_bank.state_dict()
+        if self.appearance_dim > 0:
+            checkpoint["embedding_appearance"] = self.embedding_appearance.state_dict()
+        return checkpoint
 
     def restore(self, model_args, training_args):
-        (
-            self.active_sh_degree,
-            self._xyz,
-            self._features_dc,
-            self._features_rest,
-            self._scaling,
-            self._rotation,
-            self._opacity,
-            self.max_radii2D,
-            xyz_gradient_accum,
-            denom,
-            opt_dict,
-            self.spatial_lr_scale,
-        ) = model_args
+        if not isinstance(model_args, dict) or model_args.get("format_version") != 1:
+            raise ValueError(
+                "Unsupported checkpoint format. This anchor model cannot restore "
+                "legacy tuple checkpoints."
+            )
+
+        self._anchor = nn.Parameter(model_args["anchor"].requires_grad_(True))
+        self._level = model_args["level"]
+        self._extra_level = model_args["extra_level"]
+        self._offset = nn.Parameter(model_args["offset"].requires_grad_(True))
+        self._anchor_feat = nn.Parameter(model_args["anchor_feat"].requires_grad_(True))
+        self._scaling = nn.Parameter(model_args["scaling"].requires_grad_(True))
+        self._rotation = nn.Parameter(model_args["rotation"].requires_grad_(False))
+        self._opacity = nn.Parameter(model_args["opacity"].requires_grad_(False))
+        self._anchor_mask = model_args["anchor_mask"]
+        self.spatial_lr_scale = model_args["spatial_lr_scale"]
+        self.voxel_size = model_args["voxel_size"]
+        self.standard_dist = model_args["standard_dist"]
+        self.init_pos = model_args["init_pos"]
+        self.levels = model_args["levels"]
+        self.init_level = model_args["init_level"]
+        self.base_layer = model_args["base_layer"]
+        self._restore_block_state(model_args.get("block"))
+
+        self.mlp_opacity.load_state_dict(model_args["mlp_opacity"])
+        self.mlp_cov.load_state_dict(model_args["mlp_cov"])
+        self.mlp_color.load_state_dict(model_args["mlp_color"])
+        if self.use_feat_bank:
+            self.mlp_feature_bank.load_state_dict(model_args["mlp_feature_bank"])
+        if self.appearance_dim > 0:
+            self.embedding_appearance.load_state_dict(model_args["embedding_appearance"])
+
+        # Rebuild the optimizer around the restored Parameters before loading its state.
         self.training_setup(training_args)
-        self.xyz_gradient_accum = (
-            xyz_gradient_accum  # TODO: deal with self.send_to_gpui_cnt
+        self.opacity_accum = model_args["opacity_accum"]
+        self.offset_gradient_accum = model_args["offset_gradient_accum"]
+        self.offset_denom = model_args["offset_denom"]
+        self.anchor_demon = model_args["anchor_demon"]
+        self.optimizer.load_state_dict(model_args["optimizer"])
+
+    def set_block_bounds(self, block_spec):
+        self.block_id = block_spec.block_id
+        self.block_manifest_hash = block_spec.manifest_hash
+        self.block_core_min = torch.as_tensor(block_spec.core_min, dtype=torch.float32, device="cuda")
+        self.block_core_max = torch.as_tensor(block_spec.core_max, dtype=torch.float32, device="cuda")
+        self.block_train_min = torch.as_tensor(block_spec.train_min, dtype=torch.float32, device="cuda")
+        self.block_train_max = torch.as_tensor(block_spec.train_max, dtype=torch.float32, device="cuda")
+        self.block_core_max_inclusive = torch.as_tensor(
+            block_spec.core_max_inclusive, dtype=torch.bool, device="cuda"
         )
-        self.denom = denom
-        if opt_dict is not None:
-            self.optimizer.load_state_dict(opt_dict)
+
+    def _capture_block_state(self):
+        if not self.block_id:
+            return None
+        return {
+            "id": self.block_id,
+            "manifest_hash": self.block_manifest_hash,
+            "core_min": self.block_core_min,
+            "core_max": self.block_core_max,
+            "train_min": self.block_train_min,
+            "train_max": self.block_train_max,
+            "core_max_inclusive": self.block_core_max_inclusive,
+        }
+
+    def _restore_block_state(self, block_state):
+        args = utils.get_args()
+        requested_id = getattr(args, "block_id", "")
+        requested_manifest = getattr(args, "block_manifest", "")
+        if block_state is None:
+            if requested_id:
+                raise ValueError("A non-block checkpoint cannot resume block training")
+            return
+        if requested_id and block_state["id"] != requested_id:
+            raise ValueError(
+                f"Checkpoint block {block_state['id']} does not match requested block {requested_id}"
+            )
+        if requested_manifest:
+            from scene.block_partition import load_block_spec
+            requested = load_block_spec(requested_manifest, requested_id)
+            if requested.manifest_hash != block_state["manifest_hash"]:
+                raise ValueError("Checkpoint block manifest does not match the requested manifest")
+        self.block_id = block_state["id"]
+        self.block_manifest_hash = block_state["manifest_hash"]
+        self.block_core_min = block_state["core_min"]
+        self.block_core_max = block_state["core_max"]
+        self.block_train_min = block_state["train_min"]
+        self.block_train_max = block_state["train_max"]
+        self.block_core_max_inclusive = block_state["core_max_inclusive"]
+
+    def anchors_inside_train_block(self, xyz):
+        if self.block_train_min is None:
+            return torch.ones(xyz.shape[0], dtype=torch.bool, device=xyz.device)
+        return ((xyz >= self.block_train_min) & (xyz <= self.block_train_max)).all(dim=-1)
+
+    def anchors_inside_core_block(self, xyz):
+        if self.block_core_min is None:
+            return torch.ones(xyz.shape[0], dtype=torch.bool, device=xyz.device)
+        upper = torch.where(
+            self.block_core_max_inclusive,
+            xyz <= self.block_core_max,
+            xyz < self.block_core_max,
+        )
+        return ((xyz >= self.block_core_min) & upper).all(dim=-1)
     
 
     @property
@@ -428,6 +537,9 @@ class GaussianModel:
             self.visible_threshold = 0.0
             self.positions, self._level, self.visible_threshold, _ = self.weed_out(self.positions, self._level)
         self.positions, self._level, _, _ = self.weed_out(self.positions, self._level)
+        inside_train = self.anchors_inside_train_block(self.positions)
+        self.positions = self.positions[inside_train]
+        self._level = self._level[inside_train]
 
         print(f'Branches of Tree: {self.fork}')
         print(f'Base Layer of Tree: {self.base_layer}')
@@ -798,18 +910,19 @@ class GaussianModel:
         elif not args.gaussians_distribution:
             if group.rank() != 0:
                 return
-            anchor = self._anchor.detach().cpu().numpy()
-            levels = self._level.detach().cpu().numpy()
-            extra_levels = self._extra_level.unsqueeze(dim=1).detach().cpu().numpy()
+            save_mask = self.anchors_inside_core_block(self._anchor) if args.block_core_only else slice(None)
+            anchor = self._anchor[save_mask].detach().cpu().numpy()
+            levels = self._level[save_mask].detach().cpu().numpy()
+            extra_levels = self._extra_level[save_mask].unsqueeze(dim=1).detach().cpu().numpy()
             infos = np.zeros_like(levels, dtype=np.float32)
             infos[0, 0] = self.voxel_size
             infos[1, 0] = self.standard_dist
 
-            anchor_feats = self._anchor_feat.detach().cpu().numpy()
-            offsets = self._offset.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
-            opacities = self._opacity.detach().cpu().numpy()
-            scales = self._scaling.detach().cpu().numpy()
-            rots = self._rotation.detach().cpu().numpy()
+            anchor_feats = self._anchor_feat[save_mask].detach().cpu().numpy()
+            offsets = self._offset[save_mask].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
+            opacities = self._opacity[save_mask].detach().cpu().numpy()
+            scales = self._scaling[save_mask].detach().cpu().numpy()
+            rots = self._rotation[save_mask].detach().cpu().numpy()
             if path.endswith(".ply"):
                 path = (
                     path[:-4]
@@ -831,7 +944,17 @@ class GaussianModel:
         PlyData([el]).write(path)
         # remark: max_radii2D, xyz_gradient_accum and denom are not saved here; they are save elsewhere.
 
-        np.savez(os.path.join(os.path.dirname(path), 'additional_attributes.npz'),init_pos=self.init_pos.detach().cpu())
+        block_state = self._capture_block_state()
+        np.savez(
+            os.path.join(os.path.dirname(path), 'additional_attributes.npz'),
+            init_pos=self.init_pos.detach().cpu(),
+            block_id=self.block_id,
+            block_manifest_hash=self.block_manifest_hash,
+            block_core_min=None if block_state is None else self.block_core_min.detach().cpu().numpy(),
+            block_core_max=None if block_state is None else self.block_core_max.detach().cpu().numpy(),
+            block_train_min=None if block_state is None else self.block_train_min.detach().cpu().numpy(),
+            block_train_max=None if block_state is None else self.block_train_max.detach().cpu().numpy(),
+        )
 
         # remark: max_radii2D, xyz_gradient_accum and denom are not saved here; they are save elsewhere.
     def save_mlp_checkpoints(self, path):#split or unite
@@ -1327,6 +1450,11 @@ class GaussianModel:
                 candidate_anchor, new_level, _, weed_mask = self.weed_out(candidate_anchor, new_level)
                 remove_duplicates_clone = remove_duplicates.clone()
                 remove_duplicates[remove_duplicates_clone] = weed_mask
+                inside_train = self.anchors_inside_train_block(candidate_anchor)
+                kept_unique = torch.where(remove_duplicates)[0]
+                remove_duplicates[kept_unique] = inside_train
+                candidate_anchor = candidate_anchor[inside_train]
+                new_level = new_level[inside_train]
             else:
                 candidate_anchor = torch.zeros([0, 3], dtype=torch.float, device='cuda')
                 remove_duplicates = torch.ones([0], dtype=torch.bool, device='cuda')
@@ -1345,6 +1473,11 @@ class GaussianModel:
                     candidate_anchor_ds, new_level_ds, _, weed_ds_mask = self.weed_out(candidate_anchor_ds, new_level_ds)
                     remove_duplicates_ds_clone = remove_duplicates_ds.clone()
                     remove_duplicates_ds[remove_duplicates_ds_clone] = weed_ds_mask
+                    inside_train_ds = self.anchors_inside_train_block(candidate_anchor_ds)
+                    kept_unique_ds = torch.where(remove_duplicates_ds)[0]
+                    remove_duplicates_ds[kept_unique_ds] = inside_train_ds
+                    candidate_anchor_ds = candidate_anchor_ds[inside_train_ds]
+                    new_level_ds = new_level_ds[inside_train_ds]
                 else:
                     candidate_anchor_ds = torch.zeros([0, 3], dtype=torch.float, device='cuda')
                     remove_duplicates_ds = torch.ones([0], dtype=torch.bool, device='cuda')

@@ -342,7 +342,10 @@ def get_expon_lr_func(
 
 
 
-def check_memory_usage(log_file, args, iteration, gaussians, before_densification_stop):
+def check_memory_usage(
+    log_file, args, iteration, gaussians, before_densification_stop,
+    proactive=False,
+):
     global DEFAULT_GROUP
 
     memory_usage = torch.cuda.memory_allocated() / 1024 / 1024 / 1024
@@ -367,17 +370,23 @@ def check_memory_usage(log_file, args, iteration, gaussians, before_densificatio
         log_file.write(log_str)
 
     if before_densification_stop:
-        memory_usage_list = our_allgather_among_cpu_processes_float_list(
-            [memory_usage], DEFAULT_GROUP   #bug fix gyy
-        )
         # print("total memory: ", torch.cuda.get_device_properties(0).total_memory)
         total_memory = (
             torch.cuda.get_device_properties(0).total_memory / 1024 / 1024 / 1024
         )
-        if (
-            max([a[0] for a in memory_usage_list])
-            > args.densify_memory_limit_percentage * total_memory
-        ):  # If memory usage is reaching the upper bound of GPU memory, stop densification to avoid OOM by fragmentation and etc.
+        memory_fraction = (
+            args.densify_memory_start_percentage
+            if proactive
+            else args.densify_memory_limit_percentage
+        )
+        # Reserved memory captures allocator pressure and fragmentation better than
+        # allocated memory.  Use the larger value locally before synchronizing the
+        # decision across ranks.
+        local_pressure = max(memory_usage, now_reserved_memory)
+        memory_usage_list = our_allgather_among_cpu_processes_float_list(
+            [local_pressure], DEFAULT_GROUP
+        )
+        if max(a[0] for a in memory_usage_list) > memory_fraction * total_memory:
             # print(
             #     "Reserved Memory usage is reaching the upper bound of GPU memory. stop densification.\n"
             # )

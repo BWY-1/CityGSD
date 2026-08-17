@@ -108,6 +108,9 @@ class ModelParams(ParamGroup):
         self.ds = 1
         self.ratio = 1 # sampling the input point cloud
         self.undistorted = False 
+        self.block_manifest = ""
+        self.block_id = ""
+        self.block_core_only = False
 
         self.appearance_dim = 0
         self.add_opacity_dist = False
