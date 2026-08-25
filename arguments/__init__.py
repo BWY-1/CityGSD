@@ -22,6 +22,8 @@ class GroupParams:
 
 
 class ParamGroup:
+    argument_types = {}
+
     def __init__(self, parser: ArgumentParser, name: str, fill_none=False):
         group = parser.add_argument_group(name)
         for key, original_value in vars(self).items():
@@ -29,7 +31,7 @@ class ParamGroup:
             if key.startswith("_"):
                 shorthand = True
                 key = key[1:]
-            value_type = type(original_value)
+            value_type = self.argument_types.get(key, type(original_value))
             default_value = None if fill_none else original_value
             if shorthand:
                 if value_type == bool:
@@ -96,6 +98,8 @@ class AuxiliaryParams(ParamGroup):
 
 
 class ModelParams(ParamGroup):
+    argument_types = {"load_iteration": int}
+
     def __init__(self, parser, sentinel=False):
 
         self.multi_view_num = 8

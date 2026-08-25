@@ -55,6 +55,15 @@ class SentinelModelParamsTests(unittest.TestCase):
 
         self.assertEqual(args.resolution_scales, [0.5, 1.0])
 
+    def test_explicit_nullable_integer_uses_declared_type(self):
+        parser = ArgumentParser()
+        ModelParams(parser, sentinel=True)
+
+        args = parser.parse_args(["--load_iteration", "-1"])
+
+        self.assertEqual(args.load_iteration, -1)
+        self.assertIsInstance(args.load_iteration, int)
+
 
 if __name__ == "__main__":
     unittest.main()
