@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
 import types
 from unittest import mock
 
@@ -24,10 +25,11 @@ def load_model_params_without_cuda_dependencies():
     module = importlib.util.module_from_spec(spec)
     with mock.patch.dict(sys.modules, stubs):
         spec.loader.exec_module(module)
-    return module.ModelParams
+    return module
 
 
-ModelParams = load_model_params_without_cuda_dependencies()
+arguments_module = load_model_params_without_cuda_dependencies()
+ModelParams = arguments_module.ModelParams
 
 
 class SentinelModelParamsTests(unittest.TestCase):
@@ -63,6 +65,30 @@ class SentinelModelParamsTests(unittest.TestCase):
 
         self.assertEqual(args.load_iteration, -1)
         self.assertIsInstance(args.load_iteration, int)
+
+    def test_old_config_receives_defaults_for_new_model_parameters(self):
+        parser = ArgumentParser()
+        ModelParams(parser, sentinel=True)
+
+        with tempfile.TemporaryDirectory() as model_path:
+            Path(model_path, "cfg_args").write_text(
+                "Namespace(model_path={!r}, resolution=4)".format(model_path),
+                encoding="utf-8",
+            )
+            argv = [
+                "train_update.py",
+                "--model_path",
+                model_path,
+                "--load_iteration",
+                "-1",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                args = arguments_module.get_combined_args(parser)
+
+        self.assertEqual(args.load_iteration, -1)
+        self.assertEqual(args.block_manifest, "")
+        self.assertEqual(args.block_id, "")
+        self.assertFalse(args.block_core_only)
 
 
 if __name__ == "__main__":

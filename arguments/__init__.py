@@ -26,6 +26,8 @@ class ParamGroup:
 
     def __init__(self, parser: ArgumentParser, name: str, fill_none=False):
         group = parser.add_argument_group(name)
+        if not hasattr(parser, "_config_fallbacks"):
+            parser._config_fallbacks = {}
         for key, original_value in vars(self).items():
             shorthand = False
             if key.startswith("_"):
@@ -33,6 +35,10 @@ class ParamGroup:
                 key = key[1:]
             value_type = self.argument_types.get(key, type(original_value))
             default_value = None if fill_none else original_value
+            # Sentinel mode uses None to detect whether the CLI explicitly
+            # supplied an option. Keep the real default separately so configs
+            # written before a parameter was introduced remain loadable.
+            parser._config_fallbacks[key] = original_value
             if shorthand:
                 if value_type == bool:
                     group.add_argument(
@@ -359,6 +365,8 @@ def get_combined_args(parser: ArgumentParser, auto_find_cfg_args_path=False):
     for k, v in vars(args_cmdline).items():
         if v != None:
             merged_dict[k] = v
+    for key, fallback in getattr(parser, "_config_fallbacks", {}).items():
+        merged_dict.setdefault(key, fallback)
     return Namespace(**merged_dict)
 
 
