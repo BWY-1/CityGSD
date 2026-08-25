@@ -24,34 +24,47 @@ class GroupParams:
 class ParamGroup:
     def __init__(self, parser: ArgumentParser, name: str, fill_none=False):
         group = parser.add_argument_group(name)
-        for key, value in vars(self).items():
+        for key, original_value in vars(self).items():
             shorthand = False
             if key.startswith("_"):
                 shorthand = True
                 key = key[1:]
-            t = type(value)
-            value = value if not fill_none else None
+            value_type = type(original_value)
+            default_value = None if fill_none else original_value
             if shorthand:
-                if t == bool:
+                if value_type == bool:
                     group.add_argument(
-                        "--" + key, ("-" + key[0:1]), default=value, action="store_true"
+                        "--" + key,
+                        ("-" + key[0:1]),
+                        default=default_value,
+                        action="store_true",
                     )
                 else:
                     group.add_argument(
-                        "--" + key, ("-" + key[0:1]), default=value, type=t
+                        "--" + key,
+                        ("-" + key[0:1]),
+                        default=default_value,
+                        type=value_type,
                     )
             else:
-                if t == bool:
-                    group.add_argument("--" + key, default=value, action="store_true")
-                elif t == list:
-                    type_to_use = int
-                    if len(value) > 0:
-                        type_to_use = type(value[0])
+                if value_type == bool:
                     group.add_argument(
-                        "--" + key, default=value, nargs="+", type=type_to_use
+                        "--" + key, default=default_value, action="store_true"
+                    )
+                elif value_type == list:
+                    type_to_use = int
+                    if len(original_value) > 0:
+                        type_to_use = type(original_value[0])
+                    group.add_argument(
+                        "--" + key,
+                        default=default_value,
+                        nargs="+",
+                        type=type_to_use,
                     )
                 else:
-                    group.add_argument("--" + key, default=value, type=t)
+                    group.add_argument(
+                        "--" + key, default=default_value, type=value_type
+                    )
 
     def extract(self, args):
         group = GroupParams()
