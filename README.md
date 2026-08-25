@@ -298,6 +298,35 @@ model: a standard, static splat export would first need to evaluate the
 view-dependent CityGS-X MLPs from a chosen camera (or bake an explicit
 view-independent approximation).
 
+### ROI-guided local scene update
+
+`train_update.py` fine-tunes an existing scene from newly registered cameras
+without changing anchors outside the requested, observed ROI. Keep the source
+model and updated output in separate paths:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python train_update.py \
+  --model_path output/original_scene \
+  --update_output_path output/scene_update_01 \
+  --load_iteration -1 \
+  -s data/update_scene \
+  --images images \
+  --update_roi "10,20,-5,60,80,50" \
+  --update_roi_margin 0.002 \
+  --min_observation_count 3 \
+  --iterations 5000 \
+  --save_iterations 5000 \
+  --checkpoint_iterations 1000 5000 \
+  --save_update_debug
+```
+
+The ROI is `xmin,ymin,zmin,xmax,ymax,zmax` in the registered CityGS-X world
+coordinate system. Shared MLPs are frozen and densification is disabled by
+default. Pass `--local_densification` only after inspecting the debug PLYs in
+`local_update_debug/`. This MVP rejects multi-GPU execution and appearance
+embeddings; it does not perform automatic change detection, addition, or
+removal.
+
 ### Spatial block training
 
 For a concrete implementation plan for single-GPU, CityGaussian-style spatial

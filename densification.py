@@ -47,6 +47,11 @@ def densification(iteration, scene, gaussians, batched_screenspace_pkg):
     timers = utils.get_timers()
     log_file = utils.get_log_file()
 
+    # Local update renders the full scene, but does not collect or apply
+    # densification unless explicitly requested.
+    if getattr(args, "local_update", False) and not args.local_densification:
+        return
+
     # Densification
     if not args.disable_auto_densification and iteration <= args.densify_until_iter:
         # Keep track of max radii in image-space for pruning

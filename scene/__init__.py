@@ -31,6 +31,7 @@ class Scene:
         :param path: Path to colmap scene main folder.
         """
         self.model_path = args.model_path
+        self.load_model_path = getattr(args, "load_model_path", "") or self.model_path
         self.loaded_iter = None
         self.gaussians = gaussians
         log_file = utils.get_log_file()
@@ -39,7 +40,7 @@ class Scene:
         if load_iteration:
             if load_iteration == -1:
                 self.loaded_iter = searchForMaxIteration(
-                    os.path.join(self.model_path, "point_cloud")
+                    os.path.join(self.load_model_path, "point_cloud")
                 )
             else:
                 self.loaded_iter = load_iteration
@@ -227,14 +228,14 @@ class Scene:
         if self.loaded_iter:
             self.gaussians.load_ply(
                 os.path.join(
-                    self.model_path, "point_cloud", "iteration_" + str(self.loaded_iter)
+                    self.load_model_path, "point_cloud", "iteration_" + str(self.loaded_iter)
                 )
             )
             cameras_for_lod = self.test_cameras if args.eval else self.train_cameras
             if not cameras_for_lod:
                 cameras_for_lod = self.test_cameras or self.train_cameras
             self.gaussians.get_camer_info(cameras_for_lod, [1.0])
-            self.gaussians.load_mlp_checkpoints(os.path.join(self.model_path,
+            self.gaussians.load_mlp_checkpoints(os.path.join(self.load_model_path,
                                                            "point_cloud",
                                                            "iteration_" + str(self.loaded_iter)))
             print("Load Voxel Size: ", self.gaussians.voxel_size)
