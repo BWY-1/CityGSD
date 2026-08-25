@@ -30,9 +30,25 @@ def load_model_params_without_cuda_dependencies():
 
 arguments_module = load_model_params_without_cuda_dependencies()
 ModelParams = arguments_module.ModelParams
+AuxiliaryParams = arguments_module.AuxiliaryParams
 
 
 class SentinelModelParamsTests(unittest.TestCase):
+    def test_auxiliary_and_model_options_do_not_conflict(self):
+        parser = ArgumentParser()
+        AuxiliaryParams(parser)
+        ModelParams(parser, sentinel=True)
+
+        option_strings = {
+            option
+            for action in parser._actions
+            for option in action.option_strings
+        }
+        self.assertIn("--detect_anomaly", option_strings)
+        self.assertNotIn("--etect_anomaly", option_strings)
+        self.assertIn("-s", option_strings)
+        self.assertIn("-m", option_strings)
+
     def test_list_default_is_unchanged_without_sentinel(self):
         parser = ArgumentParser()
         ModelParams(parser, sentinel=False)

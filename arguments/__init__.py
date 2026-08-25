@@ -28,11 +28,9 @@ class ParamGroup:
         group = parser.add_argument_group(name)
         if not hasattr(parser, "_config_fallbacks"):
             parser._config_fallbacks = {}
-        for key, original_value in vars(self).items():
-            shorthand = False
-            if key.startswith("_"):
-                shorthand = True
-                key = key[1:]
+        for declared_key, original_value in vars(self).items():
+            shorthand = declared_key.startswith("_")
+            key = declared_key[1:] if shorthand else declared_key
             value_type = self.argument_types.get(key, type(original_value))
             default_value = None if fill_none else original_value
             # Sentinel mode uses None to detect whether the CLI explicitly
