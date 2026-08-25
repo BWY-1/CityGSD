@@ -1,140 +1,100 @@
-
-
-import json
-import copy
-import os
-import numpy as np
-import open3d as o3d
 import argparse
-def EvaluateHisto(
-    source,
-    target,
-    threshold,
-    plot_stretch,
-):
+import json
 
-    print("[compute_point_cloud_to_point_cloud_distance]")
-    distance1 = source.compute_point_cloud_distance(target)
-    print("[compute_point_cloud_to_point_cloud_distance]")
-    distance2 = target.compute_point_cloud_distance(source)
-
-    [
-        precision,
-        recall,
-        fscore,
-        edges_source,
-        cum_source,
-        edges_target,
-        cum_target,
-    ] = get_f1_score_histo2(threshold, plot_stretch, distance1,
-                            distance2)
+import numpy as np
 
 
+def summarize_distances(pred_to_gt, gt_to_pred, threshold):
+    pred_to_gt = np.asarray(pred_to_gt, dtype=np.float64)
+    gt_to_pred = np.asarray(gt_to_pred, dtype=np.float64)
+    if pred_to_gt.size == 0 or gt_to_pred.size == 0:
+        return {
+            "threshold": float(threshold),
+            "precision": 0.0,
+            "recall": 0.0,
+            "fscore": 0.0,
+        }
 
-    return [
-            precision,
-            recall,
-            fscore,
-            edges_source,
-            cum_source,
-            edges_target,
-            cum_target,
-    ]
+    precision = float(np.mean(pred_to_gt < threshold))
+    recall = float(np.mean(gt_to_pred < threshold))
+    fscore = 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
+    return {
+        "threshold": float(threshold),
+        "precision": precision,
+        "recall": recall,
+        "fscore": fscore,
+        "accuracy_mean": float(pred_to_gt.mean()),
+        "accuracy_median": float(np.median(pred_to_gt)),
+        "accuracy_p95": float(np.quantile(pred_to_gt, 0.95)),
+        "completeness_mean": float(gt_to_pred.mean()),
+        "completeness_median": float(np.median(gt_to_pred)),
+        "completeness_p95": float(np.quantile(gt_to_pred, 0.95)),
+        "chamfer_l1": float(0.5 * (pred_to_gt.mean() + gt_to_pred.mean())),
+    }
 
 
+def load_geometry(path, sample_points, voxel_size):
+    import open3d as o3d
 
-def get_f1_score_histo2(threshold,
-                        plot_stretch,
-                        distance1,
-                        distance2,
-                        ):
-    print("[get_f1_score_histo2]")
-    dist_threshold = threshold
-    if len(distance1) and len(distance2):
-
-        recall = float(sum(d < threshold for d in distance2)) / float(
-            len(distance2))
-        precision = float(sum(d < threshold for d in distance1)) / float(
-            len(distance1))
-        fscore = 2 * recall * precision / (recall + precision)
-        num = len(distance1)
-        bins = np.arange(0, dist_threshold * plot_stretch, dist_threshold / 100)
-        hist, edges_source = np.histogram(distance1, bins)
-        cum_source = np.cumsum(hist).astype(float) / num
-
-        num = len(distance2)
-        bins = np.arange(0, dist_threshold * plot_stretch, dist_threshold / 100)
-        hist, edges_target = np.histogram(distance2, bins)
-        cum_target = np.cumsum(hist).astype(float) / num
-
+    mesh = o3d.io.read_triangle_mesh(path)
+    if len(mesh.triangles) > 0:
+        mesh.remove_unreferenced_vertices()
+        point_cloud = mesh.sample_points_uniformly(number_of_points=sample_points)
+        source_kind = "triangle_mesh"
     else:
-        precision = 0
-        recall = 0
-        fscore = 0
-        edges_source = np.array([0])
-        cum_source = np.array([0])
-        edges_target = np.array([0])
-        cum_target = np.array([0])
-
-    return [
-        precision,
-        recall,
-        fscore,
-        edges_source,
-        cum_source,
-        edges_target,
-        cum_target,
-    ]
+        point_cloud = o3d.io.read_point_cloud(path)
+        source_kind = "point_cloud"
+    if voxel_size > 0:
+        point_cloud = point_cloud.voxel_down_sample(voxel_size)
+    if len(point_cloud.points) == 0:
+        raise ValueError(f"No points could be loaded from {path}")
+    return point_cloud, source_kind
 
 
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='COLMAP Python Interface')
-    # 添加参数
-    parser.add_argument('--ply_path_pred', type=str, required=True, help='Path to the database file')
-    parser.add_argument('--ply_path_gt', type=str, required=True, help='Path to the database file')
-    parser.add_argument('--dtau', type=float, required=True)
-    args = parser.parse_args()
-
-    print(args.ply_path_pred)
-    mesh = o3d.io.read_triangle_mesh(args.ply_path_pred)
-    mesh.remove_unreferenced_vertices()
-    # pcd = mesh.sample_points_uniformly(number_of_points=12800000)
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(mesh.vertices)
-    # pcd = o3d.io.read_point_cloud(ply_path)
-
-    print(args.ply_path_gt)
-    mesh_gt = o3d.io.read_triangle_mesh(args.ply_path_gt)
-    mesh_gt.remove_unreferenced_vertices()
-    # pcd = mesh.sample_points_uniformly(number_of_points=12800000)
-    pcd_gt = o3d.geometry.PointCloud()
-    pcd_gt.points = o3d.utility.Vector3dVector(mesh_gt.vertices)
-
-    dTau = args.dtau
-
-    plot_stretch = 5
-    [
-        precision,
-        recall,
-        fscore,
-        edges_source,
-        cum_source,
-        edges_target,
-        cum_target,
-    ] = EvaluateHisto(
-        pcd,
-        pcd_gt,
-        dTau / 2.0,
-        plot_stretch,
-
+def main():
+    parser = argparse.ArgumentParser(description="Evaluate reconstructed geometry against aligned ground truth")
+    parser.add_argument("--ply_path_pred", required=True)
+    parser.add_argument("--ply_path_gt", required=True)
+    parser.add_argument(
+        "--dtau",
+        "--distance_threshold",
+        dest="distance_threshold",
+        type=float,
+        required=True,
+        help="Distance threshold in the coordinate unit of the input geometries",
     )
-    eva = [precision, recall, fscore]
-    print("==============================")
-    print("==============================")
-    print("distance tau : %.3f" % dTau)
-    print("precision : %.4f" % eva[0])
-    print("recall : %.4f" % eva[1])
-    print("f-score : %.4f" % eva[2])
-    print("==============================")
+    parser.add_argument("--sample_points", type=int, default=2_000_000)
+    parser.add_argument("--voxel_size", type=float, default=0.0)
+    parser.add_argument(
+        "--legacy_half_threshold",
+        action="store_true",
+        help="Use dtau/2 to reproduce the previous evaluator behavior",
+    )
+    parser.add_argument("--output_json", default="")
+    args = parser.parse_args()
+    if args.distance_threshold <= 0 or args.sample_points <= 0 or args.voxel_size < 0:
+        parser.error("threshold and sample_points must be positive; voxel_size cannot be negative")
+
+    pred, pred_kind = load_geometry(args.ply_path_pred, args.sample_points, args.voxel_size)
+    gt, gt_kind = load_geometry(args.ply_path_gt, args.sample_points, args.voxel_size)
+    pred_to_gt = pred.compute_point_cloud_distance(gt)
+    gt_to_pred = gt.compute_point_cloud_distance(pred)
+    threshold = args.distance_threshold / 2.0 if args.legacy_half_threshold else args.distance_threshold
+    metrics = summarize_distances(pred_to_gt, gt_to_pred, threshold)
+    metrics.update({
+        "prediction": args.ply_path_pred,
+        "ground_truth": args.ply_path_gt,
+        "prediction_type": pred_kind,
+        "ground_truth_type": gt_kind,
+        "prediction_points": len(pred.points),
+        "ground_truth_points": len(gt.points),
+    })
+
+    print(json.dumps(metrics, indent=2))
+    if args.output_json:
+        with open(args.output_json, "w", encoding="utf-8") as handle:
+            json.dump(metrics, handle, indent=2)
+
+
+if __name__ == "__main__":
+    main()

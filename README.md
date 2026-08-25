@@ -258,8 +258,27 @@ python render_mesh.py --bsz <bsz> -s datasets/<scene_name> --resolution 4 \
  ### Metrics for F1 score
 
 ```
-python eval_f1.py --ply_path_pred <mesh_path> --ply_path_gt <gt_point_cloud_path> --dtau 0.5
+python eval_f1.py --ply_path_pred <mesh_path> --ply_path_gt <gt_point_cloud_path> \
+    --dtau 0.5 --sample_points 2000000 --output_json geometry_metrics.json
 ```
+
+`dtau` is expressed in the coordinate unit shared by the aligned prediction and
+ground truth. The evaluator samples triangle surfaces (rather than comparing
+only mesh vertices) and reports precision, recall, F-score, accuracy,
+completeness, 95th-percentile errors, and symmetric Chamfer-L1. Use
+`--legacy_half_threshold` only to reproduce the older `dtau / 2` behavior.
+
+For real-world depth supervision, both supported image layouts resolve sibling
+directories automatically:
+
+```text
+train/images/<name>.jpg -> train/depths/<name>.png
+train/rgbs/<name>.jpg   -> train/depths/<name>.png
+```
+
+Masks and normals similarly use `train/mask` and `train/normals`. Generate and
+inspect these files before enabling DPT loss; missing supervision is not a
+substitute for a controlled RGB-only baseline.
 
 ### PLY compatibility
 
