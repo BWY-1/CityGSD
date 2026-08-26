@@ -238,6 +238,11 @@ def render_sets(
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         gaussians.eval()
         if not skip_train:
+            if not scene.getTrainCameras():
+                raise ValueError(
+                    "No training cameras are available to render. Check --images "
+                    "and the dataset split configuration."
+                )
             render_set(
                 dataset.model_path,
                 "train",
@@ -249,6 +254,13 @@ def render_sets(
             )
 
         if not skip_test:
+            if not scene.getTestCameras():
+                raise ValueError(
+                    "No test cameras are available to render. This dataset has no "
+                    "validation images, so remove --skip_train to render the "
+                    "training views, or provide a validation split before using "
+                    "--skip_train."
+                )
             render_set(
                 dataset.model_path,
                 "test",

@@ -22,36 +22,55 @@ class GroupParams:
 
 
 class ParamGroup:
+    argument_types = {}
+
     def __init__(self, parser: ArgumentParser, name: str, fill_none=False):
         group = parser.add_argument_group(name)
-        for key, value in vars(self).items():
-            shorthand = False
-            if key.startswith("_"):
-                shorthand = True
-                key = key[1:]
-            t = type(value)
-            value = value if not fill_none else None
+        if not hasattr(parser, "_config_fallbacks"):
+            parser._config_fallbacks = {}
+        for declared_key, original_value in vars(self).items():
+            shorthand = declared_key.startswith("_")
+            key = declared_key[1:] if shorthand else declared_key
+            value_type = self.argument_types.get(key, type(original_value))
+            default_value = None if fill_none else original_value
+            # Sentinel mode uses None to detect whether the CLI explicitly
+            # supplied an option. Keep the real default separately so configs
+            # written before a parameter was introduced remain loadable.
+            parser._config_fallbacks[key] = original_value
             if shorthand:
-                if t == bool:
+                if value_type == bool:
                     group.add_argument(
-                        "--" + key, ("-" + key[0:1]), default=value, action="store_true"
+                        "--" + key,
+                        ("-" + key[0:1]),
+                        default=default_value,
+                        action="store_true",
                     )
                 else:
                     group.add_argument(
-                        "--" + key, ("-" + key[0:1]), default=value, type=t
+                        "--" + key,
+                        ("-" + key[0:1]),
+                        default=default_value,
+                        type=value_type,
                     )
             else:
-                if t == bool:
-                    group.add_argument("--" + key, default=value, action="store_true")
-                elif t == list:
-                    type_to_use = int
-                    if len(value) > 0:
-                        type_to_use = type(value[0])
+                if value_type == bool:
                     group.add_argument(
-                        "--" + key, default=value, nargs="+", type=type_to_use
+                        "--" + key, default=default_value, action="store_true"
+                    )
+                elif value_type == list:
+                    type_to_use = int
+                    if len(original_value) > 0:
+                        type_to_use = type(original_value[0])
+                    group.add_argument(
+                        "--" + key,
+                        default=default_value,
+                        nargs="+",
+                        type=type_to_use,
                     )
                 else:
-                    group.add_argument("--" + key, default=value, type=t)
+                    group.add_argument(
+                        "--" + key, default=default_value, type=value_type
+                    )
 
     def extract(self, args):
         group = GroupParams()
@@ -83,6 +102,8 @@ class AuxiliaryParams(ParamGroup):
 
 
 class ModelParams(ParamGroup):
+    argument_types = {"load_iteration": int}
+
     def __init__(self, parser, sentinel=False):
 
         self.multi_view_num = 8
@@ -108,6 +129,9 @@ class ModelParams(ParamGroup):
         self.ds = 1
         self.ratio = 1 # sampling the input point cloud
         self.undistorted = False 
+        self.block_manifest = ""
+        self.block_id = ""
+        self.block_core_only = False
 
         self.appearance_dim = 0
         self.add_opacity_dist = False
@@ -339,6 +363,8 @@ def get_combined_args(parser: ArgumentParser, auto_find_cfg_args_path=False):
     for k, v in vars(args_cmdline).items():
         if v != None:
             merged_dict[k] = v
+    for key, fallback in getattr(parser, "_config_fallbacks", {}).items():
+        merged_dict.setdefault(key, fallback)
     return Namespace(**merged_dict)
 
 

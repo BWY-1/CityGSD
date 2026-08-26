@@ -47,6 +47,11 @@ def densification(iteration, scene, gaussians, batched_screenspace_pkg):
     timers = utils.get_timers()
     log_file = utils.get_log_file()
 
+    # Local update renders the full scene, but does not collect or apply
+    # densification unless explicitly requested.
+    if getattr(args, "local_update", False) and not args.local_densification:
+        return
+
     # Densification
     if not args.disable_auto_densification and iteration <= args.densify_until_iter:
         # Keep track of max radii in image-space for pruning
@@ -87,10 +92,20 @@ def densification(iteration, scene, gaussians, batched_screenspace_pkg):
             # utils.print_rank_0("iteration: {}, bsz: {}, update_interval: {}, update_residual: {}".format(iteration, args.bsz, args.densification_interval, 0))
 
             timers.start("densify_and_prune")
-
-
-
-            gaussians.adjust_anchor(
+            # Anchor growth temporarily materializes candidate coordinates,
+            # features, optimizer tensors, and their concatenated replacements.
+            # Stop before those allocations when allocator pressure is already
+            # high; checking only after growth cannot prevent an OOM.
+            utils.check_memory_usage(
+                log_file,
+                args,
+                iteration,
+                gaussians,
+                before_densification_stop=True,
+                proactive=True,
+            )
+            if not args.disable_auto_densification:
+                gaussians.adjust_anchor(
                         iteration=iteration,
                         check_interval=100, 
                         success_threshold=0.8,
@@ -120,9 +135,11 @@ def densification(iteration, scene, gaussians, batched_screenspace_pkg):
                     )
                 )
 
-            utils.check_memory_usage(
-                log_file, args, iteration, gaussians, before_densification_stop=True
-            )
+            if not args.disable_auto_densification:
+                utils.check_memory_usage(
+                    log_file, args, iteration, gaussians,
+                    before_densification_stop=True,
+                )
 
             utils.inc_densify_iter()
 

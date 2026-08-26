@@ -36,6 +36,9 @@ import cv2
 import numpy as np
 from utils.loss_utils import ssim
 from lpipsPyTorch import lpips
+from local_update.anchor_state import build_local_update_context, synchronize_context_from_model
+from local_update.local_optimizer import freeze_shared_modules
+from local_update.visualization import save_local_update_debug
 def sync_model_with_rank0(model):
     with torch.no_grad():
         for param in model.parameters():
@@ -54,7 +57,7 @@ def visualize_scalars(scalar_tensor: torch.Tensor) -> np.ndarray:
     scalar_tensor = ((1 - scalar_tensor) * 255).byte().numpy()  # inverse heatmap
     return cv2.cvtColor(cv2.applyColorMap(scalar_tensor, cv2.COLORMAP_INFERNO), cv2.COLOR_BGR2RGB)
 
-def training(dataset_args, opt_args, pipe_args, args, log_file):
+def training(dataset_args, opt_args, pipe_args, args, log_file, local_update_context=None):
 
     # Init auxiliary tools
 
@@ -111,6 +114,38 @@ def training(dataset_args, opt_args, pipe_args, args, log_file):
 
     if bg_color is not None:
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+
+    if getattr(args, "local_update", False):
+        if utils.WORLD_SIZE != 1:
+            raise NotImplementedError(
+                "Distributed local update is not implemented; run train_update.py on one GPU"
+            )
+        if gaussians.appearance_dim > 0:
+            raise NotImplementedError(
+                "MVP local update requires appearance_dim=0 to preserve old camera embeddings"
+            )
+        # The source is already a mature hierarchy. Restarting progressive LOD
+        # at iteration one would hide fine anchors during observability analysis.
+        gaussians.progressive = False
+        if local_update_context is None:
+            local_update_context = build_local_update_context(
+                args,
+                gaussians,
+                scene.getTrainCameras(),
+                pipe_args,
+                background,
+                start_from_this_iteration,
+            )
+        gaussians.freeze_shared_mlp = args.freeze_shared_mlp
+        if args.freeze_shared_mlp:
+            freeze_shared_modules(gaussians)
+        if args.save_update_debug and utils.GLOBAL_RANK == 0:
+            metadata = save_local_update_debug(
+                os.path.join(args.model_path, "local_update_debug"),
+                gaussians,
+                local_update_context,
+            )
+            log_file.write("Local update metadata: {}\n".format(metadata))
 
     # Training Loop
     end2end_timers = End2endTimer(args)
@@ -345,6 +380,8 @@ def training(dataset_args, opt_args, pipe_args, args, log_file):
             # Densification
 
             densification(iteration, scene, gaussians, batched_screenspace_pkg)
+            if local_update_context is not None and local_update_context.enabled:
+                synchronize_context_from_model(local_update_context, gaussians)
 
             # Save Gaussians
             if any(
@@ -411,8 +448,26 @@ def training(dataset_args, opt_args, pipe_args, args, log_file):
                         if param.grad is not None:
                             param.grad /= args.bsz
 
+                # This is deliberately the final gradient operation: it runs
+                # after distributed reduction and any densification bookkeeping.
+                if local_update_context is not None and local_update_context.enabled:
+                    gaussians.apply_local_gradient_mask()
+
                 if not args.stop_update_param:
+                    static_snapshot = (
+                        gaussians.capture_static_anchor_parameters()
+                        if local_update_context is not None and local_update_context.enabled
+                        else None
+                    )
                     gaussians.optimizer.step()
+                    if static_snapshot is not None:
+                        static_difference = gaussians.restore_static_anchor_parameters(
+                            static_snapshot
+                        )
+                        local_update_context.max_static_difference = max(
+                            local_update_context.max_static_difference,
+                            static_difference,
+                        )
                 gaussians.optimizer.zero_grad(set_to_none=True)
                 timers.stop("optimizer_step")
                 utils.check_initial_gpu_memory_usage("after optimizer step")
@@ -446,6 +501,18 @@ def training(dataset_args, opt_args, pipe_args, args, log_file):
         )
     )
     progress_bar.close()
+    if local_update_context is not None and local_update_context.enabled:
+        log_file.write(
+            "Local update max static parameter difference before restore: {}\n".format(
+                local_update_context.max_static_difference
+            )
+        )
+        if args.save_update_debug:
+            save_local_update_debug(
+                os.path.join(args.model_path, "local_update_debug", "final"),
+                gaussians,
+                local_update_context,
+            )
 
 
 def training_report(

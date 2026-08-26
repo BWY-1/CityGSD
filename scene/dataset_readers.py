@@ -32,6 +32,11 @@ from pathlib import Path
 from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
+from scene.block_partition import (
+    filter_basic_point_cloud,
+    filter_camera_infos,
+    load_block_spec,
+)
 import torch
 
 
@@ -55,6 +60,8 @@ class SceneInfo(NamedTuple):
     test_cameras: list
     nerf_normalization: dict
     ply_path: str
+    global_camera_count: int = 0
+    block_spec: object = None
 
 
 def getNerfppNorm(cam_info):
@@ -296,6 +303,7 @@ def readColmapSceneInfo_martix(path, images, eval, llffhold=97):
 
 
 def readColmapSceneInfo(path, images, eval, llffhold=97):
+    args = utils.get_args()
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -348,7 +356,23 @@ def readColmapSceneInfo(path, images, eval, llffhold=97):
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if not os.path.exists(c.image_path.replace('train/', 'val/'))]
         test_cam_infos  = [c for idx, c in enumerate(cam_infos) if os.path.exists(c.image_path.replace('train/', 'val/'))]
         
+    global_camera_count = len(cam_infos)
     nerf_normalization = getNerfppNorm(train_cam_infos)
+    block_spec = None
+    if args.block_manifest:
+        if not args.block_id:
+            raise ValueError("--block_id is required when --block_manifest is set")
+        block_spec = load_block_spec(args.block_manifest, args.block_id)
+        train_cam_infos = filter_camera_infos(
+            train_cam_infos, block_spec.train_camera_names
+        )
+        test_cam_infos = filter_camera_infos(
+            test_cam_infos, block_spec.test_camera_names
+        )
+        if not train_cam_infos:
+            raise ValueError(
+                f"Block {args.block_id} has no cameras in the current training split"
+            )
 
     ply_path = os.path.join(path, "sparse/0/points3D.ply")
     bin_path = os.path.join(path, "sparse/0/points3D.bin")
@@ -372,6 +396,9 @@ def readColmapSceneInfo(path, images, eval, llffhold=97):
         pcd = fetchPly(ply_path)
     except:
         pcd = None
+    if block_spec is not None:
+        point_indices = np.load(block_spec.point_indices_path)
+        pcd = filter_basic_point_cloud(pcd, point_indices)
 
     scene_info = SceneInfo(
         point_cloud=pcd,
@@ -379,6 +406,8 @@ def readColmapSceneInfo(path, images, eval, llffhold=97):
         test_cameras=test_cam_infos,
         nerf_normalization=nerf_normalization,
         ply_path=ply_path,
+        global_camera_count=global_camera_count,
+        block_spec=block_spec,
     )
     return scene_info
 

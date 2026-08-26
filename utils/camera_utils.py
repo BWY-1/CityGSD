@@ -30,6 +30,20 @@ import os
 
 
 WARNED = False
+
+
+def auxiliary_image_path(image_path, directory, extension="png"):
+    """Return a sibling supervision path for either images/ or rgbs/ layouts."""
+    parent, filename = os.path.split(image_path)
+    parent_name = os.path.basename(parent)
+    if parent_name not in ("images", "rgbs"):
+        raise ValueError(
+            f"Cannot derive {directory} path from {image_path}; expected an images/ or rgbs/ directory"
+        )
+    stem, _ = os.path.splitext(filename)
+    return os.path.join(os.path.dirname(parent), directory, f"{stem}.{extension}")
+
+
 def pix2ndc(v, S):
     return (v * 2.0 + 1.0) / S - 1.0
 
@@ -92,13 +106,13 @@ def loadCam(args, id, cam_info, decompressed_image=None, return_image=False, dep
                 depth_path = cam_info.image_path.replace("images/", "depth/", 1)
                 mask_path = cam_info.image_path.replace('images','mask')
                 mask_path = mask_path.replace('jpg','png')
+                _normal_path = cam_info.image_path.replace('images','normals')
             else:
-                depth_path = cam_info.image_path.replace('rgbs','depths')
-                mask_path = cam_info.image_path.replace('rgbs','mask')
-                mask_path = mask_path.replace('jpg','png')
+                depth_path = auxiliary_image_path(cam_info.image_path, "depths")
+                mask_path = auxiliary_image_path(cam_info.image_path, "mask")
+                _normal_path = auxiliary_image_path(cam_info.image_path, "normals")
 
             depth_path = depth_path.replace('jpg','png')
-            _normal_path = cam_info.image_path.replace('rgbs','normals')
             
             resolution = (round(orig_w/(args.resolution)), round(orig_h/(args.resolution)))
 
