@@ -92,16 +92,38 @@ class Scene:
             scene_info.train_cameras[0].width,
             scene_info.train_cameras[0].height,
         )
-        utils.set_img_size(orig_h//args.resolution, orig_w//args.resolution)
+        scaled_w = round(orig_w / args.resolution)
+        scaled_h = round(orig_h / args.resolution)
+        utils.set_img_size(scaled_h,scaled_w)
+        # utils.set_img_size(orig_h//args.resolution, orig_w//args.resolution)
         # Dataset size in GB
+        orig_w, orig_h = (
+        scene_info.train_cameras[0].width,
+        scene_info.train_cameras[0].height,
+            )
+
+        scaled_w = round(orig_w / args.resolution)
+        scaled_h = round(orig_h / args.resolution)
+
+        utils.set_img_size(scaled_h, scaled_w)
+
+        num_cameras = len(scene_info.train_cameras) + len(scene_info.test_cameras)
         dataset_size_in_GB = (
-            1.0
-            * (len(scene_info.train_cameras) + len(scene_info.test_cameras))
-            * orig_w//args.resolution
-            * orig_h//args.resolution
-            * (3)
+            num_cameras
+            * scaled_w
+            * scaled_h
+            * 3
             / 1e9
         )
+
+        # dataset_size_in_GB = (
+        #     1.0
+        #     * (len(scene_info.train_cameras) + len(scene_info.test_cameras))
+        #     * orig_w//args.resolution
+        #     * orig_h//args.resolution
+        #     * (3)
+        #     / 1e9
+        # )
         log_file.write(f"Dataset size: {dataset_size_in_GB} GB\n")
         if (
             dataset_size_in_GB < args.preload_dataset_to_gpu_threshold
@@ -133,13 +155,19 @@ class Scene:
                 "Number of local training cameras: {}\n".format(len(self.train_cameras))
             )
             if len(self.train_cameras) > 0:
+                # log_file.write(
+                #     "Image size: {}x{}\n".format(
+                #         self.train_cameras[0].image_height//args.resolution,
+                #         self.train_cameras[0].image_width//args.resolution,
+                #     )
+                # )
                 log_file.write(
                     "Image size: {}x{}\n".format(
-                        self.train_cameras[0].image_height//args.resolution,
-                        self.train_cameras[0].image_width//args.resolution,
+                        self.train_cameras[0].image_height,
+                        self.train_cameras[0].image_width,
                     )
                 )
-            
+                            
 
         # if args.eval:
         utils.print_rank_0("Decoding Test Cameras")
@@ -337,14 +365,28 @@ class Scene_precess:
             scene_info.train_cameras[0].height,
         )
         # Dataset size in GB
+        scaled_w = round(orig_w / args.resolution)
+        scaled_h = round(orig_h / args.resolution)
+
+        num_cameras = len(scene_info.train_cameras) + len(scene_info.test_cameras)
         dataset_size_in_GB = (
-            1.0
-            * (len(scene_info.train_cameras) + len(scene_info.test_cameras))
-            * orig_w//args.resolution
-            * orig_h//args.resolution
-            * (3)
+            num_cameras
+            * scaled_w
+            * scaled_h
+            * 3
             / 1e9
         )
+
+
+
+        # dataset_size_in_GB = (
+        #     1.0
+        #     * (len(scene_info.train_cameras) + len(scene_info.test_cameras))
+        #     * orig_w//args.resolution
+        #     * orig_h//args.resolution
+        #     * (3)
+        #     / 1e9
+        # )
         log_file.write(f"Dataset size: {dataset_size_in_GB} GB\n")
         if (
             dataset_size_in_GB < args.preload_dataset_to_gpu_threshold
@@ -395,10 +437,18 @@ class Scene_precess:
             "Number of local test cameras: {}\n".format(len(self.test_cameras))
         )
         if len(self.test_cameras) > 0:
+            # log_file.write(
+            #     "Image size: {}x{}\n".format(
+            #         self.test_cameras[0].image_height,
+            #         self.test_cameras[0].image_width,
+            #     )
+            # )
+
+
             log_file.write(
                 "Image size: {}x{}\n".format(
-                    self.test_cameras[0].image_height,
-                    self.test_cameras[0].image_width,
+                    self.train_cameras[0].image_height,
+                    self.train_cameras[0].image_width,
                 )
             )
         print("computing nearest_id")

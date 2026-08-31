@@ -20,6 +20,7 @@ import torch.distributed as dist
 import time
 from argparse import Namespace
 import psutil
+from datetime import timedelta
 
 ARGS = None
 LOG_FILE = None
@@ -197,9 +198,15 @@ def init_distributed(args):
     LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
     WORLD_SIZE = int(os.environ.get("WORLD_SIZE", 1))
     if WORLD_SIZE > 1:
+        # torch.distributed.init_process_group(
+        #     "nccl", rank=GLOBAL_RANK, world_size=WORLD_SIZE
+        # )
         torch.distributed.init_process_group(
-            "nccl", rank=GLOBAL_RANK, world_size=WORLD_SIZE
-        )
+            "nccl",
+            rank=GLOBAL_RANK,
+            world_size=WORLD_SIZE,
+            timeout=timedelta(hours=2),
+)
         assert torch.cuda.is_available(), "Distributed mode requires CUDA"
         assert (
             torch.distributed.is_initialized()

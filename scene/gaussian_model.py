@@ -168,43 +168,113 @@ class GaussianModel:
 
 
     def capture(self):
-        return (
-            self.active_sh_degree,
-            self._xyz,
-            self._features_dc,
-            self._features_rest,
-            self._scaling,
-            self._rotation,
-            self._opacity,
-            self.max_radii2D,
-            self.xyz_gradient_accum,  # TODO: deal with self.send_to_gpui_cnt
-            self.denom,
-            self.optimizer.state_dict(),
-            self.spatial_lr_scale,
-        )
+        # return (
+        #     self.active_sh_degree,
+        #     self._xyz,
+        #     self._features_dc,
+        #     self._features_rest,
+        #     self._scaling,
+        #     self._rotation,
+        #     self._opacity,
+        #     self.max_radii2D,
+        #     self.xyz_gradient_accum,  # TODO: deal with self.send_to_gpui_cnt
+        #     self.denom,
+        #     self.optimizer.state_dict(),
+        #     self.spatial_lr_scale,
+        # )
+        """Capture all state required to resume anchor-based training."""
+        checkpoint = {
+            "format_version": 1,
+            "anchor": self._anchor.detach(),
+            "level": self._level.detach(),
+            "extra_level": self._extra_level.detach(),
+            "offset": self._offset.detach(),
+            "anchor_feat": self._anchor_feat.detach(),
+            "scaling": self._scaling.detach(),
+            "rotation": self._rotation.detach(),
+            "opacity": self._opacity.detach(),
+            "anchor_mask": self._anchor_mask.detach(),
+            "opacity_accum": self.opacity_accum,
+            "offset_gradient_accum": self.offset_gradient_accum,
+            "offset_denom": self.offset_denom,
+            "anchor_demon": self.anchor_demon,
+            "mlp_opacity": self.mlp_opacity.state_dict(),
+            "mlp_cov": self.mlp_cov.state_dict(),
+            "mlp_color": self.mlp_color.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "spatial_lr_scale": self.spatial_lr_scale,
+            "voxel_size": self.voxel_size,
+            "standard_dist": self.standard_dist,
+            "init_pos": self.init_pos,
+            "levels": self.levels,
+            "init_level": self.init_level,
+            "base_layer": self.base_layer,
+        }
+        if self.use_feat_bank:
+            checkpoint["mlp_feature_bank"] = self.mlp_feature_bank.state_dict()
+        if self.appearance_dim > 0:
+            checkpoint["embedding_appearance"] = self.embedding_appearance.state_dict()
+        return checkpoint
 
     def restore(self, model_args, training_args):
-        (
-            self.active_sh_degree,
-            self._xyz,
-            self._features_dc,
-            self._features_rest,
-            self._scaling,
-            self._rotation,
-            self._opacity,
-            self.max_radii2D,
-            xyz_gradient_accum,
-            denom,
-            opt_dict,
-            self.spatial_lr_scale,
-        ) = model_args
+        # (
+        #     self.active_sh_degree,
+        #     self._xyz,
+        #     self._features_dc,
+        #     self._features_rest,
+        #     self._scaling,
+        #     self._rotation,
+        #     self._opacity,
+        #     self.max_radii2D,
+        #     xyz_gradient_accum,
+        #     denom,
+        #     opt_dict,
+        #     self.spatial_lr_scale,
+        # ) = model_args
+        if not isinstance(model_args, dict) or model_args.get("format_version") != 1:
+            raise ValueError(
+                "Unsupported checkpoint format. This anchor model cannot restore "
+                "legacy tuple checkpoints."
+            )
+
+        self._anchor = nn.Parameter(model_args["anchor"].requires_grad_(True))
+        self._level = model_args["level"]
+        self._extra_level = model_args["extra_level"]
+        self._offset = nn.Parameter(model_args["offset"].requires_grad_(True))
+        self._anchor_feat = nn.Parameter(model_args["anchor_feat"].requires_grad_(True))
+        self._scaling = nn.Parameter(model_args["scaling"].requires_grad_(True))
+        self._rotation = nn.Parameter(model_args["rotation"].requires_grad_(False))
+        self._opacity = nn.Parameter(model_args["opacity"].requires_grad_(False))
+        self._anchor_mask = model_args["anchor_mask"]
+        self.spatial_lr_scale = model_args["spatial_lr_scale"]
+        self.voxel_size = model_args["voxel_size"]
+        self.standard_dist = model_args["standard_dist"]
+        self.init_pos = model_args["init_pos"]
+        self.levels = model_args["levels"]
+        self.init_level = model_args["init_level"]
+        self.base_layer = model_args["base_layer"]
+
+        self.mlp_opacity.load_state_dict(model_args["mlp_opacity"])
+        self.mlp_cov.load_state_dict(model_args["mlp_cov"])
+        self.mlp_color.load_state_dict(model_args["mlp_color"])
+        if self.use_feat_bank:
+            self.mlp_feature_bank.load_state_dict(model_args["mlp_feature_bank"])
+        if self.appearance_dim > 0:
+            self.embedding_appearance.load_state_dict(model_args["embedding_appearance"])
+
+        # Rebuild the optimizer around the restored Parameters before loading its state.
         self.training_setup(training_args)
-        self.xyz_gradient_accum = (
-            xyz_gradient_accum  # TODO: deal with self.send_to_gpui_cnt
-        )
-        self.denom = denom
-        if opt_dict is not None:
-            self.optimizer.load_state_dict(opt_dict)
+        self.opacity_accum = model_args["opacity_accum"]
+        self.offset_gradient_accum = model_args["offset_gradient_accum"]
+        self.offset_denom = model_args["offset_denom"]
+        self.anchor_demon = model_args["anchor_demon"]
+        self.optimizer.load_state_dict(model_args["optimizer"])
+        # self.xyz_gradient_accum = (
+        #     xyz_gradient_accum  # TODO: deal with self.send_to_gpui_cnt
+        # )
+        # self.denom = denom
+        # if opt_dict is not None:
+        #     self.optimizer.load_state_dict(opt_dict)
     
 
     @property
